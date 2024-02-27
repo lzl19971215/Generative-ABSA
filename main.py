@@ -1,5 +1,6 @@
 import argparse
 import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 import logging
 import time
 import pickle
@@ -88,8 +89,8 @@ class T5FineTuner(pl.LightningModule):
         super(T5FineTuner, self).__init__()
         self.hparams = hparams
 
-        self.model = T5ForConditionalGeneration.from_pretrained(hparams.model_name_or_path)
-        self.tokenizer = T5Tokenizer.from_pretrained(hparams.model_name_or_path)
+        self.model = T5ForConditionalGeneration.from_pretrained(hparams.model_name_or_path, cache_dir='./t5-base')
+        self.tokenizer = T5Tokenizer.from_pretrained(hparams.model_name_or_path, cache_dir='./t5-base')
 
     def is_logger(self):
         return True
@@ -246,8 +247,7 @@ args = init_args()
 print("\n", "="*30, f"NEW EXP: {args.task.upper()} on {args.dataset}", "="*30, "\n")
 
 seed_everything(args.seed)
-
-tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
+tokenizer = T5Tokenizer.from_pretrained("google-t5/t5-base", cache_dir='./t5-base')
 
 # show one sample to check the sanity of the code and the expected output
 print(f"Here is an example (from dev set) under `{args.paradigm}` paradigm:")
@@ -257,6 +257,7 @@ data_sample = dataset[2]  # a random data sample
 print('Input :', tokenizer.decode(data_sample['source_ids'], skip_special_tokens=True))
 print('Output:', tokenizer.decode(data_sample['target_ids'], skip_special_tokens=True))
 
+model = None
 
 # training process
 if args.do_train:
@@ -264,7 +265,7 @@ if args.do_train:
     model = T5FineTuner(args)
 
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        filepath=args.output_dir, prefix="ckt", monitor='val_loss', mode='min', save_top_k=3
+        filepath=args.output_dir, prefix="ckt", monitor='val_loss', mode='min', save_top_k=1
     )
 
     # prepare for trainer
@@ -287,6 +288,8 @@ if args.do_train:
 
     print("Finish training and saving the model!")
 
+if not os.path.exists('results_log'):
+    os.mkdir('results_log')
 
 if args.do_eval:
 
@@ -373,6 +376,25 @@ if args.do_direct_eval:
 
     # print("Reload the model")
     # model.model.from_pretrained(args.output_dir)
+    if model is None:
+        all_checkpoints = []
+        last_checkpoint = None
+        last_epoch = -1
+        saved_model_dir = args.output_dir
+        for f in os.listdir(saved_model_dir):
+            file_name = os.path.join(saved_model_dir, f)
+            if 'cktepoch' in file_name:
+                all_checkpoints.append(file_name)
+                epoch = int(file_name.split('=')[-1][:-5])
+                if epoch > last_epoch:
+                    last_epoch = epoch
+                    last_checkpoint = file_name
+        assert last_checkpoint is not None
+        # reload the model and conduct inference
+        print(f"\nLoad the trained model from {last_checkpoint}...")
+        model_ckpt = torch.load(last_checkpoint)
+        model = T5FineTuner(model_ckpt['hyper_parameters'])
+        model.load_state_dict(model_ckpt['state_dict'])
 
     sents, _ = read_line_examples_from_file(f'data/{args.task}/{args.dataset}/test.txt')
 
@@ -387,8 +409,8 @@ if args.do_direct_eval:
     # write to file
     log_file_path = f"results_log/{args.task}-{args.dataset}.txt"
     local_time = time.asctime(time.localtime(time.time()))
-    exp_settings = f"{args.task} on {args.dataset} under {args.paradigm}; Train bs={args.train_batch_size}, num_epochs = {args.num_train_epochs}"
-    exp_results = f"Raw F1 = {raw_scores['f1']:.4f}, Fixed F1 = {fixed_scores['f1']:.4f}"
+    exp_settings = f"{args.task} on {args.dataset} under {args.paradigm}; Train bs={args.train_batch_size}, num_epochs = {args.num_train_epochs}; Raw F1 = {raw_scores[1]['f1']:.4f}, Fixed F1 = {fixed_scores[1]['f1']:.4f}"
+    exp_results = f"Raw = {raw_scores[0]} \nFixed = {fixed_scores[0]}"
     log_str = f'============================================================\n'
     log_str += f"{local_time}\n{exp_settings}\n{exp_results}\n\n"
     with open(log_file_path, "a+") as f:

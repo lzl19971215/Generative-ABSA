@@ -2,6 +2,7 @@
 
 import re
 import editdistance
+from sub_task_evaluate import MultiTaskEvaluatior
 
 sentiment_word_list = ['positive', 'negative', 'neutral']
 aspect_cate_list = ['location general',
@@ -339,12 +340,16 @@ def compute_scores(pred_seqs, gold_seqs, sents, io_format, task):
     
     print("\nResults of raw output")
     raw_scores = compute_f1_scores(all_predictions, all_labels)
+    raw_evaluator = MultiTaskEvaluatior()
+    all_task_raw_scores = raw_evaluator.full_evaluate(sents, all_predictions, all_labels)
     print(raw_scores)
 
     # fix the issues due to generation
     all_predictions_fixed = fix_pred_with_editdistance(all_predictions, sents, task)
     print("\nResults of fixed output")
+    fixed_evaluator = MultiTaskEvaluatior()
+    all_task_fixed_scores = fixed_evaluator.full_evaluate(sents, all_predictions_fixed, all_labels)
     fixed_scores = compute_f1_scores(all_predictions_fixed, all_labels)
     print(fixed_scores)
     
-    return raw_scores, fixed_scores, all_labels, all_predictions, all_predictions_fixed
+    return (all_task_raw_scores, raw_scores), (all_task_fixed_scores, fixed_scores), all_labels, all_predictions, all_predictions_fixed
